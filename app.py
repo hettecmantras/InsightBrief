@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 import tempfile
 import os
+import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -19,19 +21,19 @@ if API_KEY:
 
 # Page config
 st.set_page_config(
-    page_title="Multimodal AI Agent - Video Summarizer",
+    page_title="Multimodal AI Agent - Video & Web Summarizer",
     page_icon="🎥",
     layout="wide"
 )
 
-st.title("Phidata Video AI Summarizer Agent 🎥🎤🖬")
+st.title("Phidata AI Summarizer Agent 🎥🔊")
 st.header("Powered by Gemini 2.0 Flash Exp")
 
 # Initialize agent
 @st.cache_resource
 def initialize_agent():
     return Agent(
-        name="Video AI Summarizer",
+        name="Multimodal AI Summarizer",
         model=Gemini(id="gemini-2.0-flash-exp"),
         tools=[DuckDuckGo()],
         markdown=True,
@@ -64,12 +66,26 @@ def download_youtube_video(url):
     except Exception as e:
         raise Exception(f"Failed to download YouTube video: {e}")
 
-# ---- VIDEO INPUT (UPLOAD OR YOUTUBE) ----
-st.subheader("Step 1: Upload a Video or Paste a YouTube URL")
+# ---- FUNCTION TO SCRAPE WEBSITE TEXT ----
+def get_website_text(url):
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, "html.parser")
+        for script in soup(["script", "style"]):
+            script.decompose()
+        text = " ".join(soup.stripped_strings)
+        return text
+    except Exception as e:
+        return None
+
+# ---- INPUT SECTION ----
+st.subheader("Step 1: Upload a Video / YouTube URL / Website URL")
 uploaded_file = st.file_uploader("Upload a local video file", type=["mp4", "mov", "avi"])
 youtube_url = st.text_input("Or enter a YouTube video URL")
+website_url = st.text_input("Or enter a Website URL")
 
 video_path = None
+web_text = None
 
 if uploaded_file:
     temp_dir = tempfile.mkdtemp()
@@ -88,46 +104,58 @@ elif youtube_url:
     except Exception as e:
         st.error(str(e))
 
+elif website_url:
+    with st.spinner("Fetching website content..."):
+        web_text = get_website_text(website_url)
+        if web_text:
+            st.success("Website content fetched successfully!")
+        else:
+            st.error("Failed to fetch website content.")
+
 # ---- USER PROMPT ----
 user_query = st.text_area(
-    "What insights are you seeking from the video?",
-    placeholder="Ask anything about the video content...",
-    help="Provide specific questions or insights you want from the video."
+    "What insights are you seeking from the input?",
+    placeholder="Ask anything about the video or website content...",
+    help="Provide specific questions or insights you want."
 )
 
-# ---- ANALYZE VIDEO ----
-if st.button("🔍 Analyze Video", key="analyze_video_button"):
-    if not video_path:
-        st.warning("Please upload a video file or provide a YouTube URL.")
+# ---- ANALYSIS ----
+if st.button("🔍 Analyze Input", key="analyze_input_button"):
+    if not video_path and not web_text:
+        st.warning("Please upload a video, paste a YouTube or Website URL.")
     elif not user_query:
         st.warning("Please enter your query.")
     else:
         try:
-            with st.spinner("Uploading and analyzing video..."):
-                processed_video = upload_file(video_path)
-                while processed_video.state.name == "PROCESSING":
-                    time.sleep(1)
-                    processed_video = get_file(processed_video.name)
+            prompt = (
+                f"""
+                Analyze the given content.
+                Respond to the following query using insights from the input and web search if needed:
+                {user_query}
 
-                prompt = (
-                    f"""
-                    Analyze the uploaded video for content and context.
-                    Respond to the following query using video insights and web search if needed:
-                    {user_query}
+                Provide a detailed, actionable, and user-friendly answer.
+                """
+            )
 
-                    Provide a detailed, actionable, and user-friendly answer.
-                    """
-                )
+            if video_path:
+                with st.spinner("Uploading and analyzing video..."):
+                    processed_video = upload_file(video_path)
+                    while processed_video.state.name == "PROCESSING":
+                        time.sleep(1)
+                        processed_video = get_file(processed_video.name)
 
-                response = multimodal_Agent.run(prompt, videos=[processed_video])
+                    response = multimodal_Agent.run(prompt, videos=[processed_video])
+            else:
+                with st.spinner("Analyzing website content..."):
+                    response = multimodal_Agent.run(prompt + "\n\nWebsite Content:\n" + web_text)
 
             st.subheader("Analysis Result")
             st.markdown(response.content)
 
             st.download_button(
-                label="💾 Save Summary",
+                label="📀 Save Summary",
                 data=response.content,
-                file_name="video_summary.txt",
+                file_name="summary.txt",
                 mime="text/plain"
             )
 

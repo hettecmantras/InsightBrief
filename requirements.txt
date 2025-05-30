@@ -5,3 +5,4 @@ openai
 duckduckgo-search
 pytube
 yt-dlp
+bs4
